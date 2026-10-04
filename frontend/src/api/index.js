@@ -80,6 +80,17 @@ const plan = {
   removeAllotment: (id) => call(http.delete(`/plan/allotment/${id}`))
 }
 
+// ---------------- 模块三补 · 渠段检修停水窗口 ----------------
+const maintenance = {
+  list: (segmentId) => call(http.get('/maintenance/list', { params: { segmentId } })),
+  create: (data) => call(http.post('/maintenance', data)),
+  update: (id, data) => call(http.put(`/maintenance/${id}`, data)),
+  revoke: (id, note) => call(http.post(`/maintenance/${id}/revoke`, null, { params: { note } })),
+  shift: (id, operator) => call(http.post(`/maintenance/impact/${id}/shift`, null, { params: { operator } })),
+  split: (id, operator) => call(http.post(`/maintenance/impact/${id}/split`, null, { params: { operator } })),
+  keep: (id, reason, operator) => call(http.post(`/maintenance/impact/${id}/keep`, null, { params: { reason, operator } }))
+}
+
 // ---------------- 模块四 · 水位量测 ----------------
 const level = {
   list: (segmentId) => call(http.get('/level/list', { params: { segmentId } })),
@@ -138,4 +149,4 @@ const stats = {
   dict: () => call(http.get('/stats/dict'))
 }
 
-export default { http, canal, gate, plan, level, emergency, user, stats }
+export default { http, canal, gate, plan, maintenance, level, emergency, user, stats }

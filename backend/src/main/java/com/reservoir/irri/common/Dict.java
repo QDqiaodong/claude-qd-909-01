@@ -216,6 +216,35 @@ public final class Dict {
             "NORMAL", "常规",
             "URGENT", "抗旱应急");
 
+    // ---------------- 渠段检修停水窗口状态 ----------------
+    private static final Map<String, String> MW_STATUS = Map.of(
+            "ACTIVE", "生效中",
+            "REVOKED", "已撤销");
+
+    private static final Map<String, String> MW_STATUS_COLOR = Map.of(
+            "ACTIVE", "#f9a825",
+            "REVOKED", "#90a4ae");
+
+    // ---------------- 停水避让处置状态 ----------------
+    private static final Map<String, String> IMPACT_STATUS = Map.of(
+            "PENDING", "待避让",
+            "SHIFTED", "已顺延",
+            "SPLIT", "已拆分",
+            "KEPT", "例外保留",
+            "RESTORED", "已恢复");
+
+    private static final Map<String, String> IMPACT_STATUS_COLOR = Map.of(
+            "PENDING", "#e53935",
+            "SHIFTED", "#0288d1",
+            "SPLIT", "#26c6da",
+            "KEPT", "#f9a825",
+            "RESTORED", "#90a4ae");
+
+    // ---------------- 停水冲击对象类型 ----------------
+    private static final Map<String, String> IMPACT_TARGET = Map.of(
+            "PLAN", "灌溉计划",
+            "ALLOT", "配水条");
+
     // ---------------- 业务参数上限 ----------------
     /** 闸门开度上限（%） */
     public static final BigDecimal MAX_OPENING = BigDecimal.valueOf(100);
@@ -246,6 +275,9 @@ public final class Dict {
 
     /** 配水量换算：flow(m³/s) × hours(h) × 3600 / 10000 = 万m³ */
     public static final BigDecimal HOUR_FLOW_TO_VOLUME = BigDecimal.valueOf(0.36);
+
+    /** 停水拆分时向窗口外搜索可用容量的最大天数 */
+    public static final int MAX_SPLIT_SEARCH_DAYS = 14;
 
     private static String name(Map<String, String> source, String key) {
         if (key == null) {
@@ -441,5 +473,25 @@ public final class Dict {
 
     public static String emergencyDecisionName(String mode) {
         return name(EMERGENCY_DECISION, mode);
+    }
+
+    public static String mwStatusName(String status) {
+        return name(MW_STATUS, status);
+    }
+
+    public static String mwStatusColor(String status) {
+        return status == null ? "#90a4ae" : MW_STATUS_COLOR.getOrDefault(status, "#90a4ae");
+    }
+
+    public static String impactStatusName(String status) {
+        return name(IMPACT_STATUS, status);
+    }
+
+    public static String impactStatusColor(String status) {
+        return status == null ? "#90a4ae" : IMPACT_STATUS_COLOR.getOrDefault(status, "#90a4ae");
+    }
+
+    public static String impactTargetName(String type) {
+        return name(IMPACT_TARGET, type);
     }
 }

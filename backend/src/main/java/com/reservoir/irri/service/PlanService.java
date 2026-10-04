@@ -5,15 +5,20 @@ import com.reservoir.irri.common.Dict;
 import com.reservoir.irri.domain.Allotment;
 import com.reservoir.irri.domain.CanalSegment;
 import com.reservoir.irri.domain.IrrigationPlan;
+import com.reservoir.irri.domain.MaintenanceImpact;
+import com.reservoir.irri.domain.MaintenanceWindow;
 import com.reservoir.irri.dto.AllotmentRequest;
 import com.reservoir.irri.dto.PlanRequest;
 import com.reservoir.irri.dto.Views.AllotmentVO;
 import com.reservoir.irri.dto.Views.DayLoadVO;
+import com.reservoir.irri.dto.Views.MaintenanceImpactVO;
 import com.reservoir.irri.dto.Views.PlanGanttVO;
 import com.reservoir.irri.dto.Views.PlanVO;
 import com.reservoir.irri.repository.AllotmentRepository;
 import com.reservoir.irri.repository.CanalSegmentRepository;
 import com.reservoir.irri.repository.IrrigationPlanRepository;
+import com.reservoir.irri.repository.MaintenanceImpactRepository;
+import com.reservoir.irri.repository.MaintenanceWindowRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -47,13 +52,19 @@ public class PlanService {
     private final AllotmentRepository allotmentRepository;
     private final CanalSegmentRepository segmentRepository;
     private final CanalService canalService;
+    private final MaintenanceImpactRepository impactRepository;
+    private final MaintenanceWindowRepository windowRepository;
 
     public PlanService(IrrigationPlanRepository planRepository, AllotmentRepository allotmentRepository,
-                       CanalSegmentRepository segmentRepository, CanalService canalService) {
+                       CanalSegmentRepository segmentRepository, CanalService canalService,
+                       MaintenanceImpactRepository impactRepository,
+                       MaintenanceWindowRepository windowRepository) {
         this.planRepository = planRepository;
         this.allotmentRepository = allotmentRepository;
         this.segmentRepository = segmentRepository;
         this.canalService = canalService;
+        this.impactRepository = impactRepository;
+        this.windowRepository = windowRepository;
     }
 
     // ---------------- 查询 ----------------
@@ -69,13 +80,17 @@ public class PlanService {
     public List<PlanVO> listVO(Long segmentId) {
         Map<Long, CanalSegment> segments = segmentRepository.findAll().stream()
                 .collect(Collectors.toMap(CanalSegment::getId, s -> s, (a, b) -> a));
+        ImpactBrief brief = impactBrief();
         List<PlanVO> result = new ArrayList<>();
         for (IrrigationPlan plan : list(segmentId)) {
             PlanVO vo = toPlanVO(plan, segments.get(plan.getCanalSegmentId()));
+            vo.setImpact(brief.of("PLAN", plan.getId()));
             List<Allotment> own = allotmentRepository.findByPlanIdOrderByAllotDateAsc(plan.getId());
             BigDecimal volume = BigDecimal.ZERO;
             for (Allotment allotment : own) {
-                vo.getAllotments().add(toAllotmentVO(allotment, segments.get(allotment.getCanalSegmentId()), plan));
+                AllotmentVO avo = toAllotmentVO(allotment, segments.get(allotment.getCanalSegmentId()), plan);
+                avo.setImpact(brief.of("ALLOT", allotment.getId()));
+                vo.getAllotments().add(avo);
                 if (!allotment.isCanceled()) {
                     volume = volume.add(CanalService.nvl(allotment.getVolumeWan()));
                 }
@@ -121,12 +136,14 @@ public class PlanService {
 
         Map<Long, CanalSegment> segments = segmentRepository.findAll().stream()
                 .collect(Collectors.toMap(CanalSegment::getId, s -> s, (a, b) -> a));
+        ImpactBrief brief = impactBrief();
         List<Allotment> all = allotmentRepository.findBetween(from, to);
         // 每条配水补上当日合计与负载率
         for (Allotment allotment : all) {
             CanalSegment segment = segments.get(allotment.getCanalSegmentId());
             IrrigationPlan plan = planRepository.findById(allotment.getPlanId()).orElse(null);
             AllotmentVO avo = toAllotmentVO(allotment, segment, plan);
+            avo.setImpact(brief.of("ALLOT", allotment.getId()));
             BigDecimal dayTotal = CanalService.nvl(
                     allotmentRepository.sumFlowBySegmentAndDate(allotment.getCanalSegmentId(), allotment.getAllotDate()));
             avo.setDayTotalFlow(dayTotal.setScale(2, RoundingMode.HALF_UP));
@@ -135,6 +152,12 @@ public class PlanService {
             avo.setLoadRate(design.compareTo(BigDecimal.ZERO) <= 0
                     ? 0D : Math.min(1D, dayTotal.doubleValue() / design.doubleValue()));
             vo.getAllotments().add(avo);
+        }
+        // 与日期轴相交的生效中停水窗口（单元格着色 + 原因展示）
+        for (MaintenanceWindow window : windowRepository.findActiveBetween(
+                from.atStartOfDay(), to.plusDays(1).atStartOfDay())) {
+            vo.getWindows().add(MaintenanceService.toWindowVO(
+                    window, segments.get(window.getCanalSegmentId()), null, null, null));
         }
         // 每日 × 每渠段的负载（去重）
         Map<String, DayLoadVO> loadMap = new LinkedHashMap<>();
@@ -575,5 +598,44 @@ public class PlanService {
 
     private static LocalDate parseDate(String value) {
         return value == null ? null : LocalDate.parse(value);
+    }
+
+    /**
+     * 停水冲击角标：每个计划 / 配水条挑一条最有代表性的冲击项（待避让优先），
+     * 附上窗口编号与停水原因，供甘特条显示「原因 + 最终去向」。
+     */
+    private ImpactBrief impactBrief() {
+        Map<String, MaintenanceImpact> brief = MaintenanceService.briefByTarget(impactRepository.findAll());
+        Map<Long, MaintenanceWindow> windows = windowRepository.findAll().stream()
+                .collect(Collectors.toMap(MaintenanceWindow::getId, w -> w, (a, b) -> a));
+        Map<Long, IrrigationPlan> plans = planRepository.findAll().stream()
+                .collect(Collectors.toMap(IrrigationPlan::getId, p -> p, (a, b) -> a));
+        Map<Long, Allotment> allotments = allotmentRepository.findAll().stream()
+                .collect(Collectors.toMap(Allotment::getId, a -> a, (a, b) -> a));
+        return new ImpactBrief(brief, windows, plans, allotments);
+    }
+
+    /** 内部小结构：按 "PLAN#id" / "ALLOT#id" 取冲击 VO */
+    private static final class ImpactBrief {
+        private final Map<String, MaintenanceImpact> brief;
+        private final Map<Long, MaintenanceWindow> windows;
+        private final Map<Long, IrrigationPlan> plans;
+        private final Map<Long, Allotment> allotments;
+
+        private ImpactBrief(Map<String, MaintenanceImpact> brief, Map<Long, MaintenanceWindow> windows,
+                            Map<Long, IrrigationPlan> plans, Map<Long, Allotment> allotments) {
+            this.brief = brief;
+            this.windows = windows;
+            this.plans = plans;
+            this.allotments = allotments;
+        }
+
+        private MaintenanceImpactVO of(String targetType, Long targetId) {
+            MaintenanceImpact impact = brief.get(targetType + "#" + targetId);
+            if (impact == null) {
+                return null;
+            }
+            return MaintenanceService.toImpactVO(impact, windows.get(impact.getWindowId()), plans, allotments);
+        }
     }
 }

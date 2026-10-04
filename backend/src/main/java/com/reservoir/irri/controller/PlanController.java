@@ -8,6 +8,7 @@ import com.reservoir.irri.dto.PlanRequest;
 import com.reservoir.irri.dto.Views.AllotmentVO;
 import com.reservoir.irri.dto.Views.PlanGanttVO;
 import com.reservoir.irri.dto.Views.PlanVO;
+import com.reservoir.irri.service.MaintenanceService;
 import com.reservoir.irri.service.PlanService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -28,9 +29,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PlanController {
 
     private final PlanService service;
+    private final MaintenanceService maintenanceService;
 
-    public PlanController(PlanService service) {
+    public PlanController(PlanService service, MaintenanceService maintenanceService) {
         this.service = service;
+        this.maintenanceService = maintenanceService;
     }
 
     @GetMapping("/list")
@@ -75,30 +78,44 @@ public class PlanController {
 
     @PostMapping
     public ApiResponse<IrrigationPlan> create(@RequestBody PlanRequest request) {
-        return ApiResponse.success("灌溉计划已创建", service.create(request));
+        IrrigationPlan saved = service.create(request);
+        maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        return ApiResponse.success("灌溉计划已创建", saved);
     }
 
     @PutMapping("/{id}")
     public ApiResponse<IrrigationPlan> update(@PathVariable Long id, @RequestBody PlanRequest request) {
-        return ApiResponse.success("灌溉计划已更新", service.update(id, request));
+        Long oldSegmentId = service.get(id).getCanalSegmentId();
+        IrrigationPlan saved = service.update(id, request);
+        maintenanceService.rescanSegment(oldSegmentId);
+        if (!oldSegmentId.equals(saved.getCanalSegmentId())) {
+            maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        }
+        return ApiResponse.success("灌溉计划已更新", saved);
     }
 
     /** 推进计划状态：编制 → 待审批 → 已批准 → 配水中 → 已结束 */
     @PostMapping("/{id}/advance")
     public ApiResponse<IrrigationPlan> advance(@PathVariable Long id,
                                                @RequestParam(required = false) String approver) {
-        return ApiResponse.success("计划状态已推进", service.advance(id, approver));
+        IrrigationPlan saved = service.advance(id, approver);
+        maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        return ApiResponse.success("计划状态已推进", saved);
     }
 
     /** 退回编制 */
     @PostMapping("/{id}/draft")
     public ApiResponse<IrrigationPlan> backToDraft(@PathVariable Long id) {
-        return ApiResponse.success("计划已退回编制", service.backToDraft(id));
+        IrrigationPlan saved = service.backToDraft(id);
+        maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        return ApiResponse.success("计划已退回编制", saved);
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> remove(@PathVariable Long id) {
+        Long segmentId = service.get(id).getCanalSegmentId();
         service.remove(id);
+        maintenanceService.rescanSegment(segmentId);
         return ApiResponse.success("灌溉计划已删除", null);
     }
 
@@ -106,24 +123,36 @@ public class PlanController {
 
     @PostMapping("/allotment")
     public ApiResponse<Allotment> createAllotment(@RequestBody AllotmentRequest request) {
-        return ApiResponse.success("配水已排期", service.createAllotment(request));
+        Allotment saved = service.createAllotment(request);
+        maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        return ApiResponse.success("配水已排期", saved);
     }
 
     @PutMapping("/allotment/{id}")
     public ApiResponse<Allotment> updateAllotment(@PathVariable Long id,
                                                   @RequestBody AllotmentRequest request) {
-        return ApiResponse.success("配水已更新", service.updateAllotment(id, request));
+        Long oldSegmentId = service.getAllotment(id).getCanalSegmentId();
+        Allotment saved = service.updateAllotment(id, request);
+        maintenanceService.rescanSegment(oldSegmentId);
+        if (!oldSegmentId.equals(saved.getCanalSegmentId())) {
+            maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        }
+        return ApiResponse.success("配水已更新", saved);
     }
 
     /** 拖动甘特条改天数 */
     @PostMapping("/allotment/{id}/move")
     public ApiResponse<Allotment> moveAllotment(@PathVariable Long id, @RequestParam String date) {
-        return ApiResponse.success("配水日期已调整", service.moveAllotment(id, LocalDate.parse(date)));
+        Allotment saved = service.moveAllotment(id, LocalDate.parse(date));
+        maintenanceService.rescanSegment(saved.getCanalSegmentId());
+        return ApiResponse.success("配水日期已调整", saved);
     }
 
     @DeleteMapping("/allotment/{id}")
     public ApiResponse<Void> removeAllotment(@PathVariable Long id) {
+        Long segmentId = service.getAllotment(id).getCanalSegmentId();
         service.removeAllotment(id);
+        maintenanceService.rescanSegment(segmentId);
         return ApiResponse.success("配水记录已删除", null);
     }
 }

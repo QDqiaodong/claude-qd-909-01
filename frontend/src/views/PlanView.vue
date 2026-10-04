@@ -14,6 +14,23 @@ const dates = computed(() => gantt.value?.dates || [])
 const plans = computed(() => gantt.value?.plans || [])
 const allotments = computed(() => gantt.value?.allotments || [])
 const dayLoads = computed(() => gantt.value?.dayLoads || [])
+const windows = computed(() => gantt.value?.windows || [])
+
+// 某渠段某日被哪个生效中的停水窗口覆盖（跨日窗口覆盖到的自然日都算）
+function windowAt(segmentId, date) {
+  return windows.value.find((w) => w.canalSegmentId === segmentId && date >= w.startDate && date <= w.endDate) || null
+}
+
+function windowTip(w) {
+  return `${w.windowNo} 停水原因：${w.reason || '—'}（${w.startAt} ~ ${w.endAt}，${w.scope || '全段停水'}）`
+}
+
+function impactTip(impact) {
+  const lines = [`${impact.windowNo || ''} 停水原因：${impact.windowReason || '—'}`]
+  lines.push(`最终去向：${impact.resolution || '待调度员处置'}`)
+  if (impact.exceptionReason) lines.push(`例外依据：${impact.exceptionReason}`)
+  return lines.join('\n')
+}
 
 const loadMap = computed(() => {
   const map = {}
@@ -166,7 +183,7 @@ onMounted(load)
   <div>
     <div class="view-head">
       <span class="view-title">灌溉计划 · 周期甘特与配水排期</span>
-      <span class="view-tip">拖动配水条改日期；某渠段某日合计流量超设计流量会标红</span>
+      <span class="view-tip">拖动配水条改日期；斜纹格为停水窗口覆盖日，色块角标为避让去向</span>
     </div>
 
     <div class="panel" v-if="dates.length">
@@ -189,6 +206,14 @@ onMounted(load)
         <div class="plan-foot">
           <span class="tag-line" :style="{ color: p.statusColor }">
             <i class="dot" :style="{ background: p.statusColor }"></i>{{ p.statusName }}
+          </span>
+          <span
+            v-if="p.impact"
+            class="tag-line"
+            :style="{ color: p.impact.statusColor }"
+            :title="impactTip(p.impact)"
+          >
+            <i class="dot" :style="{ background: p.impact.statusColor }"></i>{{ p.impact.statusName }} · {{ p.impact.windowNo }}
           </span>
           <span class="op-meta">已排 {{ p.allottedVolume }} / 计划 {{ p.planVolume }} 万m³{{ p.locked ? '（已锁定，不可改水量）' : '' }}</span>
           <span class="plan-actions">
@@ -215,11 +240,12 @@ onMounted(load)
               v-for="d in dates"
               :key="seg.id + '-' + d"
               class="gt-cell"
-              :class="{ over: overDesign(seg.id, d), on: dragOver === seg.id + '|' + d }"
+              :class="{ over: overDesign(seg.id, d), on: dragOver === seg.id + '|' + d, mw: windowAt(seg.id, d) }"
               @dragover.prevent="dragOver = seg.id + '|' + d"
               @dragleave="dragOver = ''"
               @drop="onDrop(seg.id, d)"
             >
+              <div v-if="windowAt(seg.id, d)" class="gt-mw" :title="windowTip(windowAt(seg.id, d))">停</div>
               <div
                 v-for="a in cellAllots(seg.id, d)"
                 :key="a.id"
@@ -232,6 +258,15 @@ onMounted(load)
                 @click="pickAllot(a)"
               >
                 {{ a.flow }}×{{ a.hours }}h
+              </div>
+              <div
+                v-for="a in cellAllots(seg.id, d).filter((x) => x.impact)"
+                :key="'imp' + a.id"
+                class="gt-impact"
+                :style="{ color: a.impact.statusColor, borderColor: a.impact.statusColor }"
+                :title="impactTip(a.impact)"
+              >
+                {{ a.impact.statusName }}
               </div>
               <div v-if="cellLoad(seg.id, d)" class="gt-load" :class="{ over: overDesign(seg.id, d) }">
                 {{ cellLoad(seg.id, d).totalFlow }}
@@ -251,6 +286,8 @@ onMounted(load)
       <div class="legend">
         <span class="tag-line"><i class="dot" style="background:#0288d1"></i>合计流量在设计流量内</span>
         <span class="tag-line"><i class="dot" style="background:#e53935"></i>合计流量超设计流量</span>
+        <span class="tag-line"><i class="dot" style="background:#f9a825"></i>斜纹格 = 停水窗口覆盖日（悬停看原因）</span>
+        <span class="tag-line">色块下角标 = 避让去向（悬停看原因与最终去向）</span>
         <span class="tag-line">拖动色块改配水日期</span>
       </div>
     </div>
@@ -290,6 +327,19 @@ onMounted(load)
 }
 .gt-cell.on { border-color: var(--primary); box-shadow: inset 0 0 0 2px rgba(2, 136, 209, 0.22); }
 .gt-cell.over { background: #ffebee; border-color: #ef9a9a; }
+.gt-cell.mw {
+  background: repeating-linear-gradient(45deg, #fff8e1, #fff8e1 6px, #ffecb3 6px, #ffecb3 12px);
+  border-color: #f9a825;
+}
+.gt-mw {
+  position: absolute; top: 2px; right: 2px; z-index: 1;
+  font-size: 9px; line-height: 14px; padding: 0 4px; border-radius: 4px;
+  color: #fff; background: #f9a825; cursor: help;
+}
+.gt-impact {
+  font-size: 9.5px; text-align: center; border: 1px dashed; border-radius: 4px;
+  margin-bottom: 2px; padding: 0 2px; background: rgba(255, 255, 255, 0.86); cursor: help;
+}
 .gt-bar {
   cursor: grab; border-radius: 6px; font-size: 10.5px; text-align: center;
   color: #fff; background: linear-gradient(120deg, var(--primary), var(--primary-soft));

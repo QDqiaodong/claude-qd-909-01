@@ -14,6 +14,8 @@ CREATE DATABASE IF NOT EXISTS reservoir_irri
 USE reservoir_irri;
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS maintenance_impact;
+DROP TABLE IF EXISTS maintenance_window;
 DROP TABLE IF EXISTS emergency_event;
 DROP TABLE IF EXISTS emergency_gate_snapshot;
 DROP TABLE IF EXISTS emergency_level_context;
@@ -150,6 +152,49 @@ CREATE TABLE allotment (
     note VARCHAR(128),
     KEY idx_allot_plan (plan_id),
     KEY idx_allot_segment (canal_segment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 渠段检修停水窗口 ----------------
+-- 运维登记的渠段停水起止时间（时刻，支持跨日）、原因与范围；覆盖到的自然日均视为停水日
+-- status：ACTIVE 生效中 / REVOKED 已撤销（撤销只恢复尚未人工确认的待避让项）
+CREATE TABLE maintenance_window (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    window_no VARCHAR(32) NOT NULL UNIQUE,
+    canal_segment_id BIGINT NOT NULL,
+    start_at DATETIME NOT NULL,
+    end_at DATETIME NOT NULL,
+    reason VARCHAR(128),
+    scope VARCHAR(128),
+    status VARCHAR(16),
+    created_by VARCHAR(32),
+    created_at DATETIME,
+    revoked_at DATETIME,
+    revoke_note VARCHAR(128),
+    note VARCHAR(128),
+    KEY idx_mw_segment (canal_segment_id),
+    KEY idx_mw_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 停水窗口冲击项（待避让） ----------------
+-- target_type：PLAN 灌溉计划 / ALLOT 配水条；target_id 为对应表主键
+-- status：PENDING 待避让 / SHIFTED 已顺延 / SPLIT 已拆分 / KEPT 例外保留 / RESTORED 已恢复
+-- 已处理（SHIFTED / SPLIT / KEPT）的记录是历史，窗口重扫与撤销都不覆盖
+CREATE TABLE maintenance_impact (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    window_id BIGINT NOT NULL,
+    target_type VARCHAR(8) NOT NULL,
+    target_id BIGINT NOT NULL,
+    canal_segment_id BIGINT NOT NULL,
+    overlap_start DATE,
+    overlap_end DATE,
+    status VARCHAR(16),
+    resolution VARCHAR(256),
+    exception_reason VARCHAR(128),
+    handled_by VARCHAR(32),
+    handled_at DATETIME,
+    created_at DATETIME,
+    KEY idx_mi_window (window_id),
+    KEY idx_mi_target (target_type, target_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 水位量测（含两个 @EmbeddableInstantiator 值对象） ----------------
@@ -390,6 +435,22 @@ INSERT INTO allotment (plan_id, canal_segment_id, allot_date, flow, hours, volum
 (5,  9, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY),  3.40, 24, 29.38, 'SUPPLYING','西一支渠补水中'),
 (6, 10, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY),  0.90, 12,  3.89, 'PLANNED',  '斗渠滴灌短时段'),
 (6, 10, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY),  1.00, 10,  3.60, 'PLANNED',  '斗渠滴灌短时段');
+
+-- ---------------- 渠段检修停水窗口 ----------------
+-- MW-2026-001：已撤销的历史窗口（含一条「例外保留」的处置历史，撤销不覆盖已处理结果）
+-- MW-2026-002：生效中的跨日窗口（明天 08:00 ~ 第 3 天 20:00，覆盖 3 个自然日），
+--              与 IP-2026-S-02 计划及其第 2、3 天配水条重叠 → 三条待避让
+INSERT INTO maintenance_window (window_no, canal_segment_id, start_at, end_at, reason, scope, status, created_by, created_at, revoked_at, revoke_note, note) VALUES
+('MW-2026-001', 9, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY) + INTERVAL 8 HOUR,  DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY) + INTERVAL 18 HOUR, '渡槽止水更换', '全段停水', 'REVOKED', '周文华', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY, '检修提前完成，恢复通水', '历史窗口'),
+('MW-2026-002', 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY) + INTERVAL 8 HOUR,  DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 3 DAY) + INTERVAL 20 HOUR, '东干渠节制闸大修，需断流施工', '全段停水', 'ACTIVE', '王建国', UTC_TIMESTAMP() + INTERVAL 8 HOUR, NULL, NULL, '跨日窗口，覆盖 3 个自然日');
+
+-- ---------------- 停水窗口冲击项 ----------------
+-- MW-2026-001 的例外保留是处置历史；MW-2026-002 的三条待避让等待调度员处置
+INSERT INTO maintenance_impact (window_id, target_type, target_id, canal_segment_id, overlap_start, overlap_end, status, resolution, exception_reason, handled_by, handled_at, created_at) VALUES
+(1, 'PLAN', 5, 9, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY), 'KEPT', '例外保留原安排：抽雄期补水不可逆，经灌区调度批准窗口期照常供水', '抽雄期补水不可逆，经灌区调度批准', '灌区调度', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 DAY),
+(2, 'PLAN', 2, 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 3 DAY), 'PENDING', NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+(2, 'ALLOT', 5, 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY), 'PENDING', NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+(2, 'ALLOT', 6, 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY), 'PENDING', NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR);
 
 -- ---------------- 水位量测 ----------------
 -- window_duration_minutes / band_span / band_safety_grade 三列是派生列（值对象读库时重算），

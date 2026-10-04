@@ -6,6 +6,7 @@ import api from './api'
 import CanalView from './views/CanalView.vue'
 import GateView from './views/GateView.vue'
 import PlanView from './views/PlanView.vue'
+import MaintenanceView from './views/MaintenanceView.vue'
 import LevelView from './views/LevelView.vue'
 import EmergencyView from './views/EmergencyView.vue'
 import RequestView from './views/RequestView.vue'
@@ -16,6 +17,7 @@ const modules = [
   { key: 'canal', path: '/canal', name: '渠系', desc: '干渠 / 支渠 / 斗渠三级' },
   { key: 'gate', path: '/gate', name: '闸门', desc: '开度滑杆 · 安全区色带' },
   { key: 'plan', path: '/plan', name: '灌溉计划', desc: '周期甘特 · 拖动改天数' },
+  { key: 'maintenance', path: '/maintenance', name: '停水窗口', desc: '检修停水 · 待避让处置' },
   { key: 'level', path: '/level', name: '水位量测', desc: '折线 · 值对象派生列' },
   { key: 'emergency', path: '/emergency', name: '险情处置', desc: '异常水位 · 接管互斥 · 状态链' },
   { key: 'request', path: '/request', name: '用水申请', desc: '待审 → 已批 → 已供水' }
@@ -26,6 +28,7 @@ const viewMap = {
   '/canal': CanalView,
   '/gate': GateView,
   '/plan': PlanView,
+  '/maintenance': MaintenanceView,
   '/level': LevelView,
   '/emergency': EmergencyView,
   '/request': RequestView
@@ -70,6 +73,7 @@ onMounted(() => {
         <div class="top-stat"><b>{{ overview.gateCount }}</b><span>闸门</span></div>
         <div class="top-stat"><b>{{ overview.pendingOperationCount }}</b><span>待审批操作</span></div>
         <div class="top-stat"><b>{{ overview.planCount }}</b><span>灌溉计划</span></div>
+        <div class="top-stat"><b>{{ overview.pendingImpactCount }}</b><span>待避让</span></div>
         <div class="top-stat"><b>{{ overview.pendingRequestCount }}</b><span>待审申请</span></div>
       </div>
     </header>

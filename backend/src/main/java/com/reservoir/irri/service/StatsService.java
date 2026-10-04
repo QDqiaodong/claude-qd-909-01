@@ -15,6 +15,8 @@ import com.reservoir.irri.repository.CanalSegmentRepository;
 import com.reservoir.irri.repository.GateOperationRepository;
 import com.reservoir.irri.repository.GateRepository;
 import com.reservoir.irri.repository.IrrigationPlanRepository;
+import com.reservoir.irri.repository.MaintenanceImpactRepository;
+import com.reservoir.irri.repository.MaintenanceWindowRepository;
 import com.reservoir.irri.repository.WaterLevelRepository;
 import com.reservoir.irri.repository.WaterRequestRepository;
 import com.reservoir.irri.repository.WaterUserRepository;
@@ -39,12 +41,16 @@ public class StatsService {
     private final WaterLevelRepository levelRepository;
     private final WaterUserRepository userRepository;
     private final WaterRequestRepository requestRepository;
+    private final MaintenanceWindowRepository windowRepository;
+    private final MaintenanceImpactRepository impactRepository;
 
     public StatsService(CanalRepository canalRepository, CanalSegmentRepository segmentRepository,
                         GateRepository gateRepository, GateOperationRepository operationRepository,
                         IrrigationPlanRepository planRepository, AllotmentRepository allotmentRepository,
                         WaterLevelRepository levelRepository, WaterUserRepository userRepository,
-                        WaterRequestRepository requestRepository) {
+                        WaterRequestRepository requestRepository,
+                        MaintenanceWindowRepository windowRepository,
+                        MaintenanceImpactRepository impactRepository) {
         this.canalRepository = canalRepository;
         this.segmentRepository = segmentRepository;
         this.gateRepository = gateRepository;
@@ -54,6 +60,8 @@ public class StatsService {
         this.levelRepository = levelRepository;
         this.userRepository = userRepository;
         this.requestRepository = requestRepository;
+        this.windowRepository = windowRepository;
+        this.impactRepository = impactRepository;
     }
 
     public OverviewVO overview() {
@@ -78,6 +86,8 @@ public class StatsService {
         vo.setUserCount(userRepository.count());
         vo.setRequestCount(requestRepository.count());
         vo.setPendingRequestCount(requestRepository.countByStatus("PENDING"));
+        vo.setMaintenanceWindowCount(windowRepository.countByStatus("ACTIVE"));
+        vo.setPendingImpactCount(impactRepository.countByStatus("PENDING"));
         vo.setTotalDesignFlow(designFlow.setScale(2, RoundingMode.HALF_UP));
         vo.setTotalAreaMu(areaMu.setScale(2, RoundingMode.HALF_UP));
         return vo;
@@ -125,6 +135,8 @@ public class StatsService {
         map.put("userStatus", options(List.of("ACTIVE", "ARREAR", "DISABLED"), Dict::userStatusName));
         map.put("requestStatus", options(List.of("PENDING", "APPROVED", "SUPPLIED", "REJECTED"), Dict::requestStatusName));
         map.put("urgency", options(List.of("NORMAL", "URGENT"), Dict::urgencyName));
+        map.put("mwStatus", options(List.of("ACTIVE", "REVOKED"), Dict::mwStatusName));
+        map.put("impactStatus", options(List.of("PENDING", "SHIFTED", "SPLIT", "KEPT", "RESTORED"), Dict::impactStatusName));
         return map;
     }
 

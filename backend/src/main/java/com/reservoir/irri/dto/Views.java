@@ -180,6 +180,8 @@ public final class Views {
         private Boolean locked = Boolean.FALSE;
         /** 已排配水量合计（万m³） */
         private BigDecimal allottedVolume = BigDecimal.ZERO;
+        /** 停水窗口冲击（待避让优先，含原因与最终去向） */
+        private MaintenanceImpactVO impact;
         private List<AllotmentVO> allotments = new ArrayList<>();
     }
 
@@ -207,6 +209,8 @@ public final class Views {
         private BigDecimal dayTotalFlow = BigDecimal.ZERO;
         /** 占设计流量比例 0~1 */
         private Double loadRate = 0D;
+        /** 停水窗口冲击（待避让优先，含原因与最终去向） */
+        private MaintenanceImpactVO impact;
     }
 
     /** 甘特图的日期轴 + 每日负载 */
@@ -219,6 +223,8 @@ public final class Views {
         private List<AllotmentVO> allotments = new ArrayList<>();
         /** 每日各渠段配水流量合计（用于日负载色带） */
         private List<DayLoadVO> dayLoads = new ArrayList<>();
+        /** 与甘特日期轴相交的生效中停水窗口（单元格着色用） */
+        private List<MaintenanceWindowVO> windows = new ArrayList<>();
     }
 
     /** 某渠段某日的配水负载 */
@@ -234,6 +240,66 @@ public final class Views {
         private BigDecimal remainFlow = BigDecimal.ZERO;
         /** 剩余可配水量（万m³）= 剩余流量 × 8.64 */
         private BigDecimal remainVolume = BigDecimal.ZERO;
+    }
+
+    // ---------------- 模块三补：渠段检修停水窗口 ----------------
+
+    /** 停水窗口（含其冲击项） */
+    @Data
+    public static class MaintenanceWindowVO {
+        private Long id;
+        private String windowNo;
+        private Long canalSegmentId;
+        private String segmentCode;
+        private String segmentName;
+        private String startAt;
+        private String endAt;
+        /** 窗口覆盖的首日 / 末日（跨日窗口跨多个自然日） */
+        private String startDate;
+        private String endDate;
+        private String reason;
+        private String scope;
+        private String status;
+        private String statusName;
+        private String statusColor;
+        private String createdBy;
+        private String createdAt;
+        private String revokedAt;
+        private String revokeNote;
+        private String note;
+        /** 冲击项总数 */
+        private Integer impactCount = 0;
+        /** 仍待避让数 */
+        private Integer pendingCount = 0;
+        private List<MaintenanceImpactVO> impacts = new ArrayList<>();
+    }
+
+    /** 一条「待避让」冲击项：停水窗口 × （灌溉计划 / 配水条） */
+    @Data
+    public static class MaintenanceImpactVO {
+        private Long id;
+        private Long windowId;
+        private String windowNo;
+        /** 窗口停水原因（甘特与窗口页都要显示） */
+        private String windowReason;
+        private String targetType;
+        private String targetTypeName;
+        private Long targetId;
+        private Long canalSegmentId;
+        private String segmentCode;
+        /** 对象简述：计划编号+名称 / 配水日期+流量 */
+        private String targetLabel;
+        private String overlapStart;
+        private String overlapEnd;
+        private String status;
+        private String statusName;
+        private String statusColor;
+        /** 最终去向（顺延 / 拆分 / 例外保留 / 恢复的结果说明） */
+        private String resolution;
+        /** 例外依据（例外保留时必填） */
+        private String exceptionReason;
+        private String handledBy;
+        private String handledAt;
     }
 
     // ---------------- 模块四：水位量测 ----------------
@@ -515,6 +581,10 @@ public final class Views {
         private Long userCount;
         private Long requestCount;
         private Long pendingRequestCount;
+        /** 生效中的停水窗口数 */
+        private Long maintenanceWindowCount;
+        /** 待避让冲击项数 */
+        private Long pendingImpactCount;
         /** 灌区设计流量合计（m³/s） */
         private BigDecimal totalDesignFlow = BigDecimal.ZERO;
         /** 灌溉面积合计（亩） */
