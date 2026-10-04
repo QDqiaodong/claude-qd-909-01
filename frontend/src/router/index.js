@@ -5,6 +5,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import CanalView from '../views/CanalView.vue'
 import GateView from '../views/GateView.vue'
 import PlanView from '../views/PlanView.vue'
+import OutageView from '../views/OutageView.vue'
 import LevelView from '../views/LevelView.vue'
 import EmergencyView from '../views/EmergencyView.vue'
 import RequestView from '../views/RequestView.vue'
@@ -14,6 +15,7 @@ const routes = [
   { path: '/canal', name: 'canal', component: CanalView },
   { path: '/gate', name: 'gate', component: GateView },
   { path: '/plan', name: 'plan', component: PlanView },
+  { path: '/outage', name: 'outage', component: OutageView },
   { path: '/level', name: 'level', component: LevelView },
   { path: '/emergency', name: 'emergency', component: EmergencyView },
   { path: '/request', name: 'request', component: RequestView },

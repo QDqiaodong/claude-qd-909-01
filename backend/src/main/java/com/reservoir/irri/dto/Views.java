@@ -219,6 +219,10 @@ public final class Views {
         private List<AllotmentVO> allotments = new ArrayList<>();
         /** 每日各渠段配水流量合计（用于日负载色带） */
         private List<DayLoadVO> dayLoads = new ArrayList<>();
+        /** 与日期轴相交的生效停水窗口（甘特停水色带） */
+        private List<OutageWindowVO> windows = new ArrayList<>();
+        /** 图上计划 / 配水条相关的避让项（待避让标记与最终去向） */
+        private List<AvoidItemVO> avoidItems = new ArrayList<>();
     }
 
     /** 某渠段某日的配水负载 */
@@ -234,6 +238,77 @@ public final class Views {
         private BigDecimal remainFlow = BigDecimal.ZERO;
         /** 剩余可配水量（万m³）= 剩余流量 × 8.64 */
         private BigDecimal remainVolume = BigDecimal.ZERO;
+    }
+
+    // ---------------- 模块三补：渠段检修停水窗口与避让 ----------------
+
+    /** 停水窗口（渠段检修停水起止 + 原因 + 范围） */
+    @Data
+    public static class OutageWindowVO {
+        private Long id;
+        private String windowNo;
+        private Long canalSegmentId;
+        private String segmentCode;
+        private String segmentName;
+        private String startAt;
+        private String endAt;
+        /** 覆盖的整日区间（跨日窗口按覆盖日展开，甘特色带用） */
+        private String startDay;
+        private String endDay;
+        private Integer coverDays = 0;
+        private String reason;
+        private String scopeType;
+        private String scopeTypeName;
+        private String scopeNote;
+        private String status;
+        private String statusName;
+        private String statusColor;
+        private String createdBy;
+        private String createdAt;
+        private String updatedAt;
+        private String canceledAt;
+        private String cancelNote;
+        private String note;
+        /** 待避让项数 */
+        private Long pendingCount = 0L;
+        /** 已人工处理（顺延 / 拆分 / 例外保留）项数 */
+        private Long dealtCount = 0L;
+        /** 窗口撤销 / 变更时自动恢复的项数 */
+        private Long restoredCount = 0L;
+    }
+
+    /** 一条避让项：窗口命中的计划或配水条，含最终去向 */
+    @Data
+    public static class AvoidItemVO {
+        private Long id;
+        private Long windowId;
+        private String windowNo;
+        /** 停水原因（随窗口带出，甘特与窗口页都直接显示） */
+        private String windowReason;
+        private String targetType;
+        private String targetTypeName;
+        private Long planId;
+        private String planCode;
+        private String planName;
+        private Long allotmentId;
+        private String allotDate;
+        private BigDecimal allotFlow;
+        private Long canalSegmentId;
+        private String segmentCode;
+        private String origStartDate;
+        private String origEndDate;
+        private String status;
+        private String statusName;
+        private String statusColor;
+        /** 最终去向：顺延 / 拆分 / 例外保留的处理说明 */
+        private String resolutionNote;
+        private String newStartDate;
+        private String newEndDate;
+        private Long splitPlanId;
+        private String splitPlanCode;
+        private String operator;
+        private String resolvedAt;
+        private String createdAt;
     }
 
     // ---------------- 模块四：水位量测 ----------------

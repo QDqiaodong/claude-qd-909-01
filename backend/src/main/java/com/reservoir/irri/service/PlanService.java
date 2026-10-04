@@ -5,6 +5,7 @@ import com.reservoir.irri.common.Dict;
 import com.reservoir.irri.domain.Allotment;
 import com.reservoir.irri.domain.CanalSegment;
 import com.reservoir.irri.domain.IrrigationPlan;
+import com.reservoir.irri.domain.OutageWindow;
 import com.reservoir.irri.dto.AllotmentRequest;
 import com.reservoir.irri.dto.PlanRequest;
 import com.reservoir.irri.dto.Views.AllotmentVO;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ import org.springframework.util.StringUtils;
  *   <li>计划周期结束日不得早于开始日</li>
  *   <li>计划审批通过后（已批准 / 配水中 / 已结束）不允许再改水量</li>
  *   <li>停用渠段不允许配水（复用 CanalService.assertCanAllot）</li>
+ *   <li>与停水窗口联动：计划 / 配水新建、改期、删除后自动重扫待避让（见 OutageService）</li>
  * </ol>
  */
 @Service
@@ -47,13 +50,16 @@ public class PlanService {
     private final AllotmentRepository allotmentRepository;
     private final CanalSegmentRepository segmentRepository;
     private final CanalService canalService;
+    private final OutageService outageService;
 
     public PlanService(IrrigationPlanRepository planRepository, AllotmentRepository allotmentRepository,
-                       CanalSegmentRepository segmentRepository, CanalService canalService) {
+                       CanalSegmentRepository segmentRepository, CanalService canalService,
+                       OutageService outageService) {
         this.planRepository = planRepository;
         this.allotmentRepository = allotmentRepository;
         this.segmentRepository = segmentRepository;
         this.canalService = canalService;
+        this.outageService = outageService;
     }
 
     // ---------------- 查询 ----------------
@@ -106,6 +112,17 @@ public class PlanService {
         }
         if (to == null) {
             to = from.plusDays(13);
+        }
+        // 停水窗口：把生效窗口的覆盖日并入日期轴，保证甘特能看到停水色带
+        List<OutageWindow> outageWindows = outageService.activeWindows();
+        for (OutageWindow window : outageWindows) {
+            LocalDate[] days = OutageService.windowDays(window);
+            if (days[0].isBefore(from)) {
+                from = days[0];
+            }
+            if (days[1].isAfter(to)) {
+                to = days[1];
+            }
         }
         if (ChronoUnit.DAYS.between(from, to) > 60) {
             to = from.plusDays(60);
@@ -165,6 +182,11 @@ public class PlanService {
                     .setScale(2, RoundingMode.HALF_UP));
             vo.getDayLoads().add(load);
         }
+        // 停水窗口与避让项随甘特返回：前端画停水色带、待避让标记与最终去向
+        vo.setWindows(outageService.ganttWindows(from, to));
+        Set<Long> planIds = plans.stream().map(PlanVO::getId).collect(Collectors.toSet());
+        Set<Long> allotIds = all.stream().map(Allotment::getId).collect(Collectors.toSet());
+        vo.setAvoidItems(outageService.ganttItems(planIds, allotIds));
         return vo;
     }
 
@@ -236,7 +258,10 @@ public class PlanService {
             plan.setPlanFlow(BigDecimal.ZERO);
         }
         recalcVolume(plan);
-        return planRepository.save(plan);
+        IrrigationPlan saved = planRepository.save(plan);
+        // 与停水窗口联动：新计划若落在生效窗口内即标待避让
+        outageService.scanPlan(saved);
+        return saved;
     }
 
     @Transactional
@@ -278,7 +303,10 @@ public class PlanService {
         CanalService.ifNotNull(request.getNote(), plan::setNote);
         recalcDays(plan);
         recalcVolume(plan);
-        return planRepository.save(plan);
+        IrrigationPlan saved = planRepository.save(plan);
+        // 与停水窗口联动：周期 / 渠段变化后重扫待避让
+        outageService.scanPlan(saved);
+        return saved;
     }
 
     /** 推进计划状态（编制 → 待审批 → 已批准 → 配水中 → 已结束） */
@@ -297,7 +325,10 @@ public class PlanService {
             plan.setApprover(approver == null ? "灌区调度" : approver);
             plan.setApproveTime(LocalDateTime.now());
         }
-        return planRepository.save(plan);
+        IrrigationPlan saved = planRepository.save(plan);
+        // 已结束的计划不再是避让对象
+        outageService.scanPlan(saved);
+        return saved;
     }
 
     /** 驳回 / 退回编制 */
@@ -310,7 +341,9 @@ public class PlanService {
         plan.setStatus("DRAFT");
         plan.setApprover(null);
         plan.setApproveTime(null);
-        return planRepository.save(plan);
+        IrrigationPlan saved = planRepository.save(plan);
+        outageService.scanPlan(saved);
+        return saved;
     }
 
     @Transactional
@@ -323,6 +356,8 @@ public class PlanService {
         if (!own.isEmpty()) {
             throw new BizException("计划下仍有 " + own.size() + " 条配水记录，请先删除配水");
         }
+        // 计划删除：其未人工确认的待避让项自动解除
+        outageService.restorePendingForPlan(id, "计划已删除，自动解除");
         planRepository.delete(plan);
     }
 
@@ -368,7 +403,10 @@ public class PlanService {
         if (allotment.getStatus() == null) {
             allotment.setStatus("PLANNED");
         }
-        return allotmentRepository.save(allotment);
+        Allotment saved = allotmentRepository.save(allotment);
+        // 与停水窗口联动：新配水若落在生效窗口内即标待避让
+        outageService.scanAllotment(saved);
+        return saved;
     }
 
     @Transactional
@@ -405,7 +443,10 @@ public class PlanService {
                 .multiply(BigDecimal.valueOf(allotment.getHours() == null ? 24 : allotment.getHours()))
                 .multiply(Dict.HOUR_FLOW_TO_VOLUME)
                 .setScale(2, RoundingMode.HALF_UP));
-        return allotmentRepository.save(allotment);
+        Allotment saved = allotmentRepository.save(allotment);
+        // 与停水窗口联动：改期 / 改状态后重扫待避让
+        outageService.scanAllotment(saved);
+        return saved;
     }
 
     /** 拖动甘特条改天数：只改日期，流量不变 */
@@ -425,7 +466,10 @@ public class PlanService {
         CanalSegment segment = canalService.assertCanAllot(allotment.getCanalSegmentId());
         assertDayCapacity(segment, newDate, allotment.getFlow(), allotment.getId());
         allotment.setAllotDate(newDate);
-        return allotmentRepository.save(allotment);
+        Allotment saved = allotmentRepository.save(allotment);
+        // 与停水窗口联动：拖动改期后重扫待避让
+        outageService.scanAllotment(saved);
+        return saved;
     }
 
     @Transactional
@@ -435,6 +479,8 @@ public class PlanService {
         if (plan != null && plan.isLocked()) {
             throw new BizException("所属计划已" + Dict.planStatusName(plan.getStatus()) + "，不允许删除配水");
         }
+        // 配水删除：其未人工确认的待避让项自动解除
+        outageService.restorePendingForAllotment(id, "配水已删除，自动解除");
         allotmentRepository.delete(allotment);
     }
 

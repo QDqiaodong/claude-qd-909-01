@@ -122,6 +122,41 @@ public final class Dict {
             "DONE", "#43a047",
             "CANCELED", "#e53935");
 
+    // ---------------- 渠段检修停水窗口 ----------------
+    private static final Map<String, String> OUTAGE_STATUS = Map.of(
+            "ACTIVE", "生效中",
+            "CANCELED", "已撤销");
+
+    private static final Map<String, String> OUTAGE_STATUS_COLOR = Map.of(
+            "ACTIVE", "#e53935",
+            "CANCELED", "#90a4ae");
+
+    /** 停水范围：全段停水 / 局部停水（局部停水也要标避让，由调度员决定是否例外保留） */
+    private static final Map<String, String> OUTAGE_SCOPE = Map.of(
+            "FULL", "全段停水",
+            "PARTIAL", "局部停水");
+
+    // ---------------- 停水窗口避让项 ----------------
+    private static final Map<String, String> AVOID_STATUS = Map.of(
+            "PENDING", "待避让",
+            "POSTPONED", "已顺延",
+            "SPLIT", "已拆分",
+            "KEPT", "例外保留",
+            "RESTORED", "已恢复");
+
+    private static final Map<String, String> AVOID_STATUS_COLOR = Map.of(
+            "PENDING", "#f9a825",
+            "POSTPONED", "#0288d1",
+            "SPLIT", "#5e35b1",
+            "KEPT", "#8d6e63",
+            "RESTORED", "#43a047");
+
+    /** 避让处理方式：整体顺延 / 拆分改期 / 例外保留 */
+    private static final Map<String, String> AVOID_ACTION = Map.of(
+            "POSTPONE", "整体顺延",
+            "SPLIT", "拆分改期",
+            "KEEP", "例外保留");
+
     // ---------------- 量测变幅安全等级（由 LevelBand 值对象派生） ----------------
     private static final Map<String, String> SAFETY_GRADE = Map.of(
             "STEADY", "平稳",
@@ -360,6 +395,46 @@ public final class Dict {
 
     public static String allotStatusName(String status) {
         return name(ALLOT_STATUS, status);
+    }
+
+    public static boolean isValidOutageStatus(String status) {
+        return status != null && OUTAGE_STATUS.containsKey(status);
+    }
+
+    public static String outageStatusName(String status) {
+        return name(OUTAGE_STATUS, status);
+    }
+
+    public static String outageStatusColor(String status) {
+        return status == null ? "#90a4ae" : OUTAGE_STATUS_COLOR.getOrDefault(status, "#90a4ae");
+    }
+
+    public static boolean isValidOutageScope(String scope) {
+        return scope != null && OUTAGE_SCOPE.containsKey(scope);
+    }
+
+    public static String outageScopeName(String scope) {
+        return name(OUTAGE_SCOPE, scope);
+    }
+
+    public static boolean isValidAvoidStatus(String status) {
+        return status != null && AVOID_STATUS.containsKey(status);
+    }
+
+    public static String avoidStatusName(String status) {
+        return name(AVOID_STATUS, status);
+    }
+
+    public static String avoidStatusColor(String status) {
+        return status == null ? "#90a4ae" : AVOID_STATUS_COLOR.getOrDefault(status, "#90a4ae");
+    }
+
+    public static boolean isValidAvoidAction(String action) {
+        return action != null && AVOID_ACTION.containsKey(action);
+    }
+
+    public static String avoidActionName(String action) {
+        return name(AVOID_ACTION, action);
     }
 
     public static String allotStatusColor(String status) {

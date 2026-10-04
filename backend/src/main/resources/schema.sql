@@ -14,6 +14,8 @@ CREATE DATABASE IF NOT EXISTS reservoir_irri
 USE reservoir_irri;
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS outage_avoid_item;
+DROP TABLE IF EXISTS outage_window;
 DROP TABLE IF EXISTS emergency_event;
 DROP TABLE IF EXISTS emergency_gate_snapshot;
 DROP TABLE IF EXISTS emergency_level_context;
@@ -150,6 +152,55 @@ CREATE TABLE allotment (
     note VARCHAR(128),
     KEY idx_allot_plan (plan_id),
     KEY idx_allot_segment (canal_segment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 渠段检修停水窗口 ----------------
+-- 运维登记的渠段停水起止（可跨日）、原因与范围；生效 / 变更时扫描重叠的灌溉计划与配水条标为待避让
+-- status：ACTIVE 生效中 / CANCELED 已撤销（撤销只恢复未人工确认的待避让项，已处理结果保留）
+CREATE TABLE outage_window (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    window_no VARCHAR(32) NOT NULL UNIQUE,
+    canal_segment_id BIGINT NOT NULL,
+    start_at DATETIME NOT NULL,
+    end_at DATETIME NOT NULL,
+    reason VARCHAR(128),
+    scope_type VARCHAR(16),
+    scope_note VARCHAR(128),
+    status VARCHAR(16),
+    created_by VARCHAR(32),
+    created_at DATETIME,
+    updated_at DATETIME,
+    canceled_at DATETIME,
+    cancel_note VARCHAR(128),
+    note VARCHAR(128),
+    KEY idx_outage_segment (canal_segment_id),
+    KEY idx_outage_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 停水窗口避让项 ----------------
+-- 一个窗口 × 一个重叠对象（一条计划或一条配水条）；orig_* 是命中时的周期快照
+-- status：PENDING 待避让 / POSTPONED 已顺延 / SPLIT 已拆分 / KEPT 例外保留 / RESTORED 已恢复
+-- resolution_note 记录最终去向；KEPT 时为例外依据
+CREATE TABLE outage_avoid_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    window_id BIGINT NOT NULL,
+    target_type VARCHAR(16) NOT NULL,
+    plan_id BIGINT,
+    allotment_id BIGINT,
+    canal_segment_id BIGINT NOT NULL,
+    orig_start_date DATE,
+    orig_end_date DATE,
+    status VARCHAR(16) NOT NULL,
+    resolution_note VARCHAR(256),
+    new_start_date DATE,
+    new_end_date DATE,
+    split_plan_id BIGINT,
+    operator VARCHAR(32),
+    resolved_at DATETIME,
+    created_at DATETIME,
+    KEY idx_avoid_window (window_id),
+    KEY idx_avoid_plan (plan_id),
+    KEY idx_avoid_allotment (allotment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 水位量测（含两个 @EmbeddableInstantiator 值对象） ----------------
@@ -433,3 +484,29 @@ INSERT INTO water_request (request_no, water_user_id, canal_segment_id, allot_da
 ('WR-2026-0108', 8,  9,  DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY), 3.60, 'COTTON',    88.50, 'NORMAL', 'SUPPLIED', NULL,                     '灌区调度', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR, '花铃期补水'),
 ('WR-2026-0109', 9,  10, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY), 0.60, 'VEGETABLE', 12.40, 'NORMAL', 'APPROVED', NULL,                     '灌区调度', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR, NULL, '滴灌用水，量小次数多'),
 ('WR-2026-0110', 10, 8,  DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY), 2.20, 'RICE',      55.70, 'NORMAL', 'REJECTED', '该户已注销，不再受理用水申请',     '灌区调度', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY, NULL, '');
+
+-- ---------------- 渠段检修停水窗口 ----------------
+-- MW-2026-0001：东干渠进口段跨 3 天全段停水（生效中），命中计划 IP-2026-S-02 与其 +2 天配水条
+-- MW-2026-0002：西一支渠局部停水（已撤销），演示「撤销只恢复未确认项，例外保留的历史不覆盖」
+INSERT INTO outage_window (window_no, canal_segment_id, start_at, end_at, reason, scope_type, scope_note, status, created_by, created_at, updated_at, canceled_at, cancel_note, note) VALUES
+('MW-2026-0001', 1,
+ DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY) + INTERVAL 6 HOUR,
+ DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 4 DAY) + INTERVAL 22 HOUR,
+ '进口段量水堰拆除重建，需断流施工', 'FULL', '桩号 0+800~1+600 全断面', 'ACTIVE',
+ '运维-赵工', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR,
+ NULL, NULL, '预计 3 天，遇雨顺延另行登记'),
+('MW-2026-0002', 9,
+ DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY) + INTERVAL 8 HOUR,
+ DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY) + INTERVAL 18 HOUR,
+ '西一支渠节制闸启闭机更换', 'PARTIAL', '可维持 1.0 m³/s 以下低压过水', 'CANCELED',
+ '运维-赵工', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY, '与供电所停电计划冲突，取消本次检修，另行登记', NULL);
+
+-- ---------------- 停水窗口避让项 ----------------
+-- MW-2026-0001 命中：计划 IP-2026-S-02（今天 ~ +9 天）与其 +2 天的配水条，均待避让
+-- MW-2026-0002 已撤销：计划 IP-2026-S-04 例外保留（历史不覆盖），SUPPLYING 配水条自动恢复
+INSERT INTO outage_avoid_item (window_id, target_type, plan_id, allotment_id, canal_segment_id, orig_start_date, orig_end_date, status, resolution_note, new_start_date, new_end_date, split_plan_id, operator, resolved_at, created_at) VALUES
+(1, 'PLAN', 2, NULL, 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 9 DAY), 'PENDING', NULL, NULL, NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR),
+(1, 'ALLOT', 2, 6, 1, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 2 DAY), NULL, 'PENDING', NULL, NULL, NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR),
+(2, 'PLAN', 5, NULL, 9, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY), DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 3 DAY), 'KEPT', '例外依据：抽雄期补水临界，经灌区调度批准保持 1.0 m³/s 以下低压过水，检修与供水并行', NULL, NULL, NULL, '灌区调度', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY),
+(2, 'ALLOT', 5, 10, 9, DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY), NULL, 'RESTORED', '窗口撤销，自动恢复', NULL, NULL, NULL, NULL, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY);

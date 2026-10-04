@@ -31,6 +31,14 @@ public interface AllotmentRepository extends JpaRepository<Allotment, Long> {
             + "and a.status <> 'CANCELED' order by a.id asc")
     List<Allotment> findActiveBySegmentAndDate(@Param("segmentId") Long segmentId, @Param("day") LocalDate day);
 
+    /** 某渠段日期区间内已排期 / 配水中的配水条（停水窗口扫描用） */
+    @Query("select a from Allotment a where a.canalSegmentId = :segmentId "
+            + "and a.allotDate >= :from and a.allotDate <= :to and a.status in ('PLANNED','SUPPLYING') "
+            + "order by a.allotDate asc, a.id asc")
+    List<Allotment> findActiveBetween(@Param("segmentId") Long segmentId,
+                                      @Param("from") LocalDate from,
+                                      @Param("to") LocalDate to);
+
     @Query("select count(a) from Allotment a where a.status = :status")
     long countByStatus(@Param("status") String status);
 
